@@ -2,24 +2,43 @@
   <div
     v-if="mode !== 'isolated'"
     ref="button"
-    class="button-base mt-2 px-3 py-2 bg-button-bg rounded-xl flex items-center gap-2"
+    v-tooltip.right="'Minecraft accounts'"
+    class="button-base avatar-button"
     :class="{ expanded: mode === 'expanded' }"
-    @click="toggleMenu"
+    @click="showCard = !showCard"
   >
     <Avatar
-      size="36px"
+      :size="mode === 'expanded' ? 'xs' : 'sm'"
       :src="
         selectedAccount
           ? `https://mc-heads.net/avatar/${selectedAccount.id}/128`
           : 'https://launcher-files.modrinth.com/assets/steve_head.png'
       "
     />
-    <div class="flex flex-col w-full">
-      <span>{{ selectedAccount ? selectedAccount.username : 'Select account' }}</span>
-      <span class="text-secondary text-xs">Minecraft account</span>
-    </div>
-    <DropdownIcon class="w-5 h-5 shrink-0" />
   </div>
+
+  <Modal ref="chooseAccountTypeModal" header="Choose new account type">
+    <div class="choose-account-modal">
+      <div class="account-types">
+        <Button @click="login()">
+          <SSOMicrosoftIcon />Microsoft
+        </Button>
+        <Button @click="$refs.chooseAccountTypeModal.hide(); $refs.chooseOfflineUsernameModal.show()">
+          <ClientIcon />Offline
+        </Button>
+      </div>
+    </div>
+  </Modal>
+
+  <Modal ref="chooseOfflineUsernameModal" header="Choose username for your offline account">
+    <div class="choose-offline-username-modal">
+      <input type="text" placeholder="Username" v-model="offlineUsername" />
+      <Button icon-only color="primary" @click="offlineLogin(offlineUsername)">
+        <LogInIcon />
+      </Button>
+    </div>
+  </Modal>
+
   <transition name="fade">
     <Card
       v-if="showCard || mode === 'isolated'"
@@ -39,7 +58,8 @@
       </div>
       <div v-else class="logged-out account">
         <h4>Not signed in</h4>
-        <Button v-tooltip="'Log in'" icon-only color="primary" @click="login()">
+        <Button v-tooltip="'Log in'" icon-only color="primary"
+            @click="$refs.chooseAccountTypeModal.show()">
           <LogInIcon />
         </Button>
       </div>
@@ -54,7 +74,7 @@
           </Button>
         </div>
       </div>
-      <Button v-if="accounts.length > 0" @click="login()">
+      <Button v-if="accounts.length > 0" @click="$refs.chooseAccountTypeModal.show()">
         <PlusIcon />
         Add account
       </Button>
@@ -63,18 +83,19 @@
 </template>
 
 <script setup>
-import { DropdownIcon, PlusIcon, TrashIcon, LogInIcon } from '@modrinth/assets'
-import { Avatar, Button, Card } from '@modrinth/ui'
+import { PlusIcon, TrashIcon, LogInIcon, SSOMicrosoftIcon, ClientIcon } from '@modrinth/assets'
+import { Avatar, Button, Card, Modal } from '@modrinth/ui'
 import { ref, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import {
   users,
   remove_user,
   set_default_user,
   login as login_flow,
+  offline_login,
   get_default_user,
 } from '@/helpers/auth'
 import { handleError } from '@/store/state.js'
-import { trackEvent } from '@/helpers/analytics'
+import { mixpanel_track } from '@/helpers/mixpanel'
 import { process_listener } from '@/helpers/events'
 import { handleSevereError } from '@/store/error.js'
 
@@ -88,8 +109,12 @@ defineProps({
 
 const emit = defineEmits(['change'])
 
+const chooseAccountTypeModal = ref(null)
+const chooseOfflineUsernameModal = ref(null)
+
 const accounts = ref({})
 const defaultUser = ref()
+const offlineUsername = ref('')
 
 async function refreshValues() {
   defaultUser.value = await get_default_user().catch(handleError)
@@ -122,7 +147,23 @@ async function login() {
     await refreshValues()
   }
 
-  trackEvent('AccountLogIn')
+  mixpanel_track('AccountLogIn')
+}
+
+async function offlineLogin(username) {
+  if (username.length == 0) {
+    return
+  }
+
+  chooseOfflineUsernameModal.value.hide()
+  const loggedIn = await offline_login(username).catch(handleSevereError)
+
+  if (loggedIn) {
+    await setAccount(loggedIn)
+    await refreshValues()
+  }
+
+  mixpanel_track('AccountLogIn')
 }
 
 const logout = async (id) => {
@@ -134,12 +175,12 @@ const logout = async (id) => {
   } else {
     emit('change')
   }
-  trackEvent('AccountLogOut')
+  mixpanel_track('AccountLogOut')
 }
 
-const showCard = ref(false)
-const card = ref(null)
-const button = ref(null)
+let showCard = ref(false)
+let card = ref(null)
+let button = ref(null)
 const handleClickOutside = (event) => {
   const elements = document.elementsFromPoint(event.clientX, event.clientY)
   if (
@@ -148,15 +189,7 @@ const handleClickOutside = (event) => {
     !elements.includes(card.value.$el) &&
     !button.value.contains(event.target)
   ) {
-    toggleMenu(false)
-  }
-}
-
-function toggleMenu(override = true) {
-  if (showCard.value || !override) {
     showCard.value = false
-  } else {
-    showCard.value = true
   }
 }
 
@@ -207,11 +240,11 @@ onUnmounted(() => {
 }
 
 .account-card {
-  position: fixed;
+  position: absolute;
   display: flex;
   flex-direction: column;
-  margin-top: 0.5rem;
-  right: 2rem;
+  top: 0.5rem;
+  left: 5.5rem;
   z-index: 11;
   gap: 0.5rem;
   padding: 1rem;
@@ -286,17 +319,12 @@ onUnmounted(() => {
 
 .fade-enter-active,
 .fade-leave-active {
-  transition:
-    opacity 0.25s ease,
-    translate 0.25s ease,
-    scale 0.25s ease;
+  transition: opacity 0.3s ease;
 }
 
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-  translate: 0 -2rem;
-  scale: 0.9;
 }
 
 .avatar-button {
@@ -304,10 +332,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   color: var(--color-base);
-  background-color: var(--color-button-bg);
+  background-color: var(--color-raised-bg);
   border-radius: var(--radius-md);
   width: 100%;
-  padding: 0.5rem 0.75rem;
   text-align: left;
 
   &.expanded {
@@ -405,5 +432,28 @@ onUnmounted(() => {
     color: var(--color-contrast);
     padding: 0.5rem 1rem;
   }
+}
+
+.choose-account-modal {
+  display: flex;
+  flex-direction: column;
+  padding: 2rem 0.1rem;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  gap: 1.5rem;
+}
+
+.account-types {
+  display: flex;
+  gap: 1rem;
+}
+
+.choose-offline-username-modal {
+  display: flex;
+  padding: 2rem;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
 }
 </style>
