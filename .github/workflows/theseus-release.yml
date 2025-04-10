@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
     paths:
       - .github/workflows/theseus-release.yml
       - 'apps/app/**'
@@ -23,22 +21,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, windows-latest, ubuntu-22.04]
+        platform: [windows-latest, ubuntu-22.04]
 
     runs-on: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rust setup (mac)
-        if: startsWith(matrix.platform, 'macos')
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
-
       - name: Rust setup
-        if: "!startsWith(matrix.platform, 'macos')"
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -48,12 +38,6 @@ jobs:
         with:
           path: |
             target/**
-            !target/*/release/bundle/*/*.dmg
-            !target/*/release/bundle/*/*.app.tar.gz
-            !target/*/release/bundle/*/*.app.tar.gz.sig
-            !target/release/bundle/*/*.dmg
-            !target/release/bundle/*/*.app.tar.gz
-            !target/release/bundle/*/*.app.tar.gz.sig
 
             !target/release/bundle/appimage/*.AppImage
             !target/release/bundle/appimage/*.AppImage.tar.gz
@@ -106,41 +90,17 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: build app (macos)
-        run: pnpm --filter=@modrinth/app run tauri build --target universal-apple-darwin --config "tauri-release.conf.json"
-        if: startsWith(matrix.platform, 'macos')
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ENABLE_CODE_SIGNING: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-
       - name: build app
         run: pnpm --filter=@modrinth/app run tauri build --config "tauri-release.conf.json"
         id: build_os
-        if: "!startsWith(matrix.platform, 'macos')"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: upload ${{ matrix.platform }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}
           path: |
-            target/*/release/bundle/*/*.dmg
-            target/*/release/bundle/*/*.app.tar.gz
-            target/*/release/bundle/*/*.app.tar.gz.sig
-            target/release/bundle/*/*.dmg
-            target/release/bundle/*/*.app.tar.gz
-            target/release/bundle/*/*.app.tar.gz.sig
 
             target/release/bundle/*/*.AppImage
             target/release/bundle/*/*.AppImage.tar.gz
